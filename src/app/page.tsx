@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import type { Transition } from "framer-motion";
 
@@ -16,7 +16,6 @@ function ForceSound() {
       return audio;
     };
 
-    // Несколько потоков звука, чтобы увеличить шанс автоплея
     const audios = [makeAudio(), makeAudio()];
 
     const tryPlay = () => {
@@ -29,7 +28,6 @@ function ForceSound() {
       });
     };
 
-    // Агрессивные попытки старта
     tryPlay();
     const keepAlive = setInterval(tryPlay, 1500);
     const retries: NodeJS.Timeout[] = [];
@@ -37,9 +35,7 @@ function ForceSound() {
       retries.push(setTimeout(tryPlay, i * 600));
     }
 
-    const resume = () => {
-      tryPlay();
-    };
+    const resume = () => tryPlay();
 
     document.addEventListener("pointerdown", resume);
     document.addEventListener("touchstart", resume);
@@ -68,18 +64,24 @@ type PigParticle = {
   id: string;
   x: number;
   y: number;
+  vx: number;
+  vy: number;
+  vr: number;
   size: number;
   rotate: number;
   delay?: number;
 };
 
+type Viewport = { w: number; h: number };
+
 const floatTransition: Transition = {
   type: "spring",
-  stiffness: 320,
-  damping: 22,
+  stiffness: 180,
+  damping: 16,
+  mass: 0.4,
 };
 
-const createPigs = (count: number): PigParticle[] =>
+const createPigs = (count: number): Omit<PigParticle, "vx" | "vy" | "vr">[] =>
   Array.from({ length: count }, (_, i) => ({
     id: `bg-${i}`,
     x: Math.random() * 100,
@@ -89,25 +91,98 @@ const createPigs = (count: number): PigParticle[] =>
     delay: Math.random() * 0.4,
   }));
 
-const createExplosion = (count: number): PigParticle[] =>
-  Array.from({ length: count }, (_, i) => ({
-    id: `boom-${i}`,
-    x: -140 + Math.random() * 280, // шире диапазон по экрану
-    y: -140 + Math.random() * 280,
-    size: 26 + Math.random() * 34,
-    rotate: Math.random() * 1280,
-    delay: Math.random() * 0.35,
-  }));
+const createExplosion = (count: number, view: Viewport): PigParticle[] => {
+  const cx = view.w / 2;
+  const cy = view.h / 2;
+
+  return Array.from({ length: count }, (_, i) => {
+    const angle = Math.random() * Math.PI * 2;
+    const speed = 450 + Math.random() * 700; // px/s
+    const vx = Math.cos(angle) * speed;
+    const vy = Math.sin(angle) * speed;
+    const vr = -720 + Math.random() * 1440; // deg/s
+
+    return {
+      id: `boom-${i}`,
+      x: cx,
+      y: cy,
+      vx,
+      vy,
+      vr,
+      size: 26 + Math.random() * 34,
+      rotate: Math.random() * 360,
+      delay: Math.random() * 0.25,
+    };
+  });
+};
 
 export default function Home() {
   const [boom, setBoom] = useState<PigParticle[]>([]);
-  const [backgroundPigs] = useState<PigParticle[]>(() => createPigs(50));
+  const [backgroundPigs] = useState(() => createPigs(40));
   const [waveKey, setWaveKey] = useState(0);
+  const [view, setView] = useState<Viewport>({ w: 1200, h: 800 });
+  const boundsRef = useRef(view);
+
+  useEffect(() => {
+    boundsRef.current = view;
+  }, [view]);
 
   const triggerBoom = useCallback(() => {
-    setBoom(createExplosion(140));
+    const w = typeof window !== "undefined" ? window.innerWidth : 1200;
+    const h = typeof window !== "undefined" ? window.innerHeight : 800;
+    const viewport = { w, h };
+    setView(viewport);
+    setBoom(createExplosion(90, viewport));
     setWaveKey((k) => k + 1);
   }, []);
+
+  // simple physics with bounces
+  useEffect(() => {
+    if (boom.length === 0) return;
+
+    let active = true;
+    let last = performance.now();
+
+    const step = (now: number) => {
+      const dt = Math.min((now - last) / 1000, 0.04);
+      last = now;
+      setBoom((prev) => {
+        const { w, h } = boundsRef.current;
+        return prev.map((p) => {
+          let x = p.x + p.vx * dt;
+          let y = p.y + p.vy * dt;
+          let vx = p.vx;
+          let vy = p.vy;
+          const rotate = p.rotate + p.vr * dt;
+
+          if (x < 0) {
+            x = -x;
+            vx = -vx;
+          } else if (x > w) {
+            x = w - (x - w);
+            vx = -vx;
+          }
+
+          if (y < 0) {
+            y = -y;
+            vy = -vy;
+          } else if (y > h) {
+            y = h - (y - h);
+            vy = -vy;
+          }
+
+          return { ...p, x, y, vx, vy, rotate };
+        });
+      });
+
+      if (active) requestAnimationFrame(step);
+    };
+
+    requestAnimationFrame(step);
+    return () => {
+      active = false;
+    };
+  }, [boom.length]);
 
   return (
     <div className="relative min-h-screen overflow-hidden bg-black text-white">
@@ -170,23 +245,28 @@ export default function Home() {
             {boom.map((pig) => (
               <motion.span
                 key={pig.id}
-                initial={{ scale: 0, rotate: 0, opacity: 0 }}
+                initial={{
+                  x: view.w / 2,
+                  y: view.h / 2,
+                  scale: 0.4,
+                  opacity: 0,
+                }}
                 animate={{
-                  scale: [0, 1.4, 1],
+                  x: pig.x,
+                  y: pig.y,
                   rotate: pig.rotate,
+                  scale: 1,
                   opacity: 1,
-                  x: ["0%", `${pig.x}%`],
-                  y: ["0%", `${pig.y}%`],
                 }}
                 transition={{
                   ...floatTransition,
-                  duration: 1,
+                  duration: 0.6,
                   delay: pig.delay ?? 0,
                 }}
                 className="absolute select-none"
                 style={{
-                  left: "50%",
-                  top: "50%",
+                  left: 0,
+                  top: 0,
                   fontSize: `${pig.size}px`,
                 }}
               >
