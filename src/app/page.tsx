@@ -1,24 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import type { Transition } from "framer-motion";
 
 const SOUND_SRC = "/screaming-sound-effect-when-killing-pigs.mp3";
-const BG_COUNT = 30;
-const EXPLOSION_COUNT = 70;
-
-type PigParticle = {
-  id: string;
-  x: number;
-  y: number;
-  vx: number;
-  vy: number;
-  vr: number;
-  size: number;
-  rotate: number;
-  delay?: number;
-};
 
 type StaticPig = {
   id: string;
@@ -29,13 +15,20 @@ type StaticPig = {
   delay?: number;
 };
 
-type Viewport = { w: number; h: number };
+type BlastPig = {
+  id: string;
+  size: number;
+  rotate: number;
+  delay?: number;
+  tx: number;
+  ty: number;
+};
 
 const floatTransition: Transition = {
   type: "spring",
   stiffness: 180,
-  damping: 16,
-  mass: 0.4,
+  damping: 18,
+  mass: 0.5,
 };
 
 function ForceSound() {
@@ -92,7 +85,7 @@ function ForceSound() {
   return null;
 }
 
-const createBackground = (count: number): StaticPig[] =>
+const makeBackground = (count: number): StaticPig[] =>
   Array.from({ length: count }, (_, i) => ({
     id: `bg-${i}`,
     x: Math.random() * 100,
@@ -102,32 +95,17 @@ const createBackground = (count: number): StaticPig[] =>
     delay: Math.random() * 0.4,
   }));
 
-const createExplosion = (count: number, view: Viewport): PigParticle[] => {
-  const cx = view.w / 2;
-  const cy = view.h / 2;
+const makeBlast = (count: number): BlastPig[] =>
+  Array.from({ length: count }, (_, i) => ({
+    id: `blast-${i}`,
+    size: 28 + Math.random() * 30,
+    rotate: Math.random() * 720,
+    delay: Math.random() * 0.25,
+    tx: -120 + Math.random() * 240,
+    ty: -120 + Math.random() * 240,
+  }));
 
-  return Array.from({ length: count }, (_, i) => {
-    const angle = Math.random() * Math.PI * 2;
-    const speed = 420 + Math.random() * 680; // px/s
-    const vx = Math.cos(angle) * speed;
-    const vy = Math.sin(angle) * speed;
-    const vr = -720 + Math.random() * 1440; // deg/s
-
-    return {
-      id: `boom-${i}`,
-      x: cx,
-      y: cy,
-      vx,
-      vy,
-      vr,
-      size: 24 + Math.random() * 30,
-      rotate: Math.random() * 360,
-      delay: Math.random() * 0.25,
-    };
-  });
-};
-
-function BackgroundPigs({ pigs }: { pigs: StaticPig[] }) {
+function Background({ pigs }: { pigs: StaticPig[] }) {
   return (
     <div className="pointer-events-none absolute inset-0">
       {pigs.map((pig) => (
@@ -151,126 +129,53 @@ function BackgroundPigs({ pigs }: { pigs: StaticPig[] }) {
   );
 }
 
-function Explosion({
+function Blast({
   pigs,
-  view,
+  runKey,
 }: {
-  pigs: PigParticle[];
-  view: Viewport;
+  pigs: BlastPig[];
+  runKey: number;
 }) {
-  const refs = useRef<Record<string, HTMLSpanElement | null>>({});
-  const state = useRef<PigParticle[]>(pigs);
-  const animRef = useRef<number>();
-
-  // Keep state in sync when explosion changes
-  useEffect(() => {
-    state.current = pigs;
-    return () => {
-      if (animRef.current) cancelAnimationFrame(animRef.current);
-    };
-  }, [pigs]);
-
-  useEffect(() => {
-    if (pigs.length === 0) return;
-
-    let active = true;
-    let last = performance.now();
-
-    const step = (now: number) => {
-      if (!active) return;
-      const dt = Math.min((now - last) / 1000, 0.04);
-      last = now;
-      const { w, h } = view;
-
-      const updated = state.current.map((p) => {
-        let x = p.x + p.vx * dt;
-        let y = p.y + p.vy * dt;
-        let vx = p.vx;
-        let vy = p.vy;
-        const rotate = p.rotate + p.vr * dt;
-
-        if (x < 0) {
-          x = -x;
-          vx = -vx;
-        } else if (x > w) {
-          x = w - (x - w);
-          vx = -vx;
-        }
-
-        if (y < 0) {
-          y = -y;
-          vy = -vy;
-        } else if (y > h) {
-          y = h - (y - h);
-          vy = -vy;
-        }
-
-        return { ...p, x, y, vx, vy, rotate };
-      });
-
-      state.current = updated;
-
-      // Direct DOM write to avoid rerenders
-      updated.forEach((p) => {
-        const node = refs.current[p.id];
-        if (node) {
-          node.style.transform = `translate(${p.x}px, ${p.y}px) rotate(${p.rotate}deg)`;
-        }
-      });
-
-      animRef.current = requestAnimationFrame(step);
-    };
-
-    animRef.current = requestAnimationFrame(step);
-
-    return () => {
-      active = false;
-      if (animRef.current) cancelAnimationFrame(animRef.current);
-    };
-  }, [pigs.length, view]);
-
   return (
     <div className="relative h-full w-full">
       <motion.div
-        key={`wave-1-${pigs.length}-${view.w}`}
+        key={`wave1-${runKey}`}
         className="pointer-events-none absolute left-1/2 top-1/2 h-32 w-32 rounded-full bg-[radial-gradient(circle,rgba(236,72,153,0.3),transparent_60%)]"
         initial={{ scale: 0.1, opacity: 0.9 }}
         animate={{ scale: 18, opacity: 0 }}
-        transition={{ duration: 1.8, ease: "easeOut" }}
+        transition={{ duration: 1.6, ease: "easeOut" }}
         style={{ translateX: "-50%", translateY: "-50%" }}
       />
       <motion.div
-        key={`wave-2-${pigs.length}-${view.w}`}
-        className="pointer-events-none absolute left-1/2 top-1/2 h-32 w-32 rounded-full bg-[radial-gradient(circle,rgba(59,130,246,0.28),transparent_60%)]"
+        key={`wave2-${runKey}`}
+        className="pointer-events-none absolute left-1/2 top-1/2 h-32 w-32 rounded-full bg-[radial-gradient(circle,rgba(59,130,246,0.3),transparent_60%)]"
         initial={{ scale: 0.1, opacity: 0.9 }}
         animate={{ scale: 20, opacity: 0 }}
-        transition={{ duration: 2, ease: "easeOut", delay: 0.05 }}
+        transition={{ duration: 1.8, ease: "easeOut", delay: 0.05 }}
         style={{ translateX: "-50%", translateY: "-50%" }}
       />
 
       {pigs.map((pig) => (
         <motion.span
           key={pig.id}
-          ref={(node) => {
-            refs.current[pig.id] = node;
-            if (node) {
-              node.style.transform = `translate(${view.w / 2}px, ${
-                view.h / 2
-              }px) rotate(${pig.rotate}deg)`;
-            }
+          initial={{ scale: 0.4, opacity: 0, x: 0, y: 0 }}
+          animate={{
+            scale: 1,
+            opacity: 1,
+            x: pig.tx,
+            y: pig.ty,
+            rotate: pig.rotate,
           }}
-          initial={{ scale: 0.4, opacity: 0 }}
-          animate={{ scale: 1, opacity: 1 }}
           transition={{
             ...floatTransition,
             duration: 0.6,
             delay: pig.delay ?? 0,
           }}
-          className="absolute select-none will-change-transform"
+          className="absolute left-1/2 top-1/2 select-none will-change-transform"
           style={{
-            left: 0,
-            top: 0,
             fontSize: `${pig.size}px`,
+            translateX: "-50%",
+            translateY: "-50%",
           }}
         >
           🐷
@@ -281,23 +186,20 @@ function Explosion({
 }
 
 export default function Home() {
-  const [boom, setBoom] = useState<PigParticle[]>([]);
-  const [backgroundPigs] = useState<StaticPig[]>(() => createBackground(BG_COUNT));
-  const [view, setView] = useState<Viewport>({ w: 1200, h: 800 });
+  const background = useMemo(() => makeBackground(30), []);
+  const [blast, setBlast] = useState<BlastPig[]>([]);
+  const [runKey, setRunKey] = useState(0);
 
   const triggerBoom = useCallback(() => {
-    const w = typeof window !== "undefined" ? window.innerWidth : 1200;
-    const h = typeof window !== "undefined" ? window.innerHeight : 800;
-    const viewport = { w, h };
-    setView(viewport);
-    setBoom(createExplosion(EXPLOSION_COUNT, viewport));
+    setBlast(makeBlast(60));
+    setRunKey((k) => k + 1);
   }, []);
 
   return (
     <div className="relative min-h-screen overflow-hidden bg-black text-white">
       <ForceSound />
 
-      <BackgroundPigs pigs={backgroundPigs} />
+      <Background pigs={background} />
 
       <div className="relative z-10 flex min-h-screen items-center justify-center px-6">
         <button
@@ -309,9 +211,9 @@ export default function Home() {
         </button>
       </div>
 
-      {boom.length > 0 && (
+      {blast.length > 0 && (
         <div className="absolute inset-0 z-20 flex items-center justify-center bg-black/70 backdrop-blur-sm">
-          <Explosion pigs={boom} view={view} />
+          <Blast pigs={blast} runKey={runKey} />
         </div>
       )}
     </div>
