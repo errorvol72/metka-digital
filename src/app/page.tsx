@@ -1,97 +1,158 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { motion } from "framer-motion";
+import type { Transition } from "framer-motion";
 
 const SOUND_SRC = "/screaming-sound-effect-when-killing-pigs.mp3";
 
 function ForceSound() {
   useEffect(() => {
-    const audio = new Audio(SOUND_SRC);
-    audio.loop = true;
-    audio.volume = 1;
+    const audios = [new Audio(SOUND_SRC), new Audio(SOUND_SRC)];
+    audios.forEach((a) => {
+      a.loop = true;
+      a.volume = 1;
+      a.muted = false;
+    });
 
     const tryPlay = () => {
-      audio.volume = 1;
-      audio.play().catch(() => {});
+      audios.forEach((a) => {
+        a.volume = 1;
+        a.muted = false;
+        a.play().catch(() => {});
+      });
     };
 
-    // Автозапуск и повторы
     tryPlay();
-    const tick = setInterval(tryPlay, 4000);
+    const interval = setInterval(tryPlay, 2000);
 
-    // Запуск по любому взаимодействию, если браузер заблокировал
     const resume = () => {
       tryPlay();
-      document.removeEventListener("pointerdown", resume);
-      document.removeEventListener("keydown", resume);
     };
+
     document.addEventListener("pointerdown", resume);
+    document.addEventListener("touchstart", resume);
     document.addEventListener("keydown", resume);
+    document.addEventListener("visibilitychange", resume);
+    window.addEventListener("focus", resume);
+    window.addEventListener("blur", resume);
 
     return () => {
-      clearInterval(tick);
+      clearInterval(interval);
       document.removeEventListener("pointerdown", resume);
+      document.removeEventListener("touchstart", resume);
       document.removeEventListener("keydown", resume);
-      audio.pause();
+      document.removeEventListener("visibilitychange", resume);
+      window.removeEventListener("focus", resume);
+      window.removeEventListener("blur", resume);
+      audios.forEach((a) => a.pause());
     };
   }, []);
 
   return null;
 }
 
-export default function Home() {
-  const [boom, setBoom] = useState(false);
+type PigParticle = {
+  id: string;
+  x: number;
+  y: number;
+  size: number;
+  rotate: number;
+  delay?: number;
+};
 
-  const pigs = useMemo(
-    () => Array.from({ length: 120 }, (_, i) => `pig-${i}`),
-    []
-  );
+const floatTransition: Transition = {
+  type: "spring",
+  stiffness: 320,
+  damping: 22,
+};
+
+const createPigs = (count: number): PigParticle[] =>
+  Array.from({ length: count }, (_, i) => ({
+    id: `bg-${i}`,
+    x: Math.random() * 100,
+    y: Math.random() * 100,
+    size: 24 + Math.random() * 36,
+    rotate: Math.random() * 360,
+  }));
+
+const createExplosion = (count: number): PigParticle[] =>
+  Array.from({ length: count }, (_, i) => ({
+    id: `boom-${i}`,
+    x: -10 + Math.random() * 120,
+    y: -10 + Math.random() * 120,
+    size: 28 + Math.random() * 38,
+    rotate: Math.random() * 720,
+    delay: Math.random() * 0.6,
+  }));
+
+export default function Home() {
+  const [boom, setBoom] = useState<PigParticle[]>([]);
+  const [backgroundPigs] = useState<PigParticle[]>(() => createPigs(80));
+
+  const triggerBoom = useCallback(() => {
+    setBoom(createExplosion(200));
+  }, []);
 
   return (
     <div className="relative min-h-screen overflow-hidden bg-black text-white">
       <ForceSound />
 
-      {/* Фон со свинками */}
-      <div className="pointer-events-none absolute inset-0 opacity-20 [background:radial-gradient(circle_at_10%_10%,rgba(255,255,255,0.04),transparent_25%),radial-gradient(circle_at_80%_20%,rgba(255,255,255,0.05),transparent_20%)]">
-        <div className="absolute inset-0 animate-pulse text-6xl leading-none">
-          <div className="grid h-full w-full grid-cols-6 gap-8 opacity-30">
-            {pigs.slice(0, 36).map((key) => (
-              <span key={key} className="text-center">🐷</span>
-            ))}
-          </div>
-        </div>
+      {/* Случайный фон со свиньями */}
+      <div className="pointer-events-none absolute inset-0">
+        {backgroundPigs.map((pig) => (
+          <span
+            key={pig.id}
+            className="absolute select-none opacity-50"
+            style={{
+              left: `${pig.x}%`,
+              top: `${pig.y}%`,
+              fontSize: `${pig.size}px`,
+              transform: `translate(-50%, -50%) rotate(${pig.rotate}deg)`,
+            }}
+          >
+            🐷
+          </span>
+        ))}
       </div>
 
-      {/* Контент */}
+      {/* Кнопка */}
       <div className="relative z-10 flex min-h-screen items-center justify-center px-6">
         <button
-          onClick={() => setBoom(true)}
-          className="flex h-24 w-24 items-center justify-center rounded-full border border-pink-500/50 bg-gradient-to-br from-pink-500 to-fuchsia-700 text-5xl shadow-[0_0_40px_-10px_rgba(236,72,153,0.8)] transition active:scale-95"
+          onClick={triggerBoom}
+          className="flex h-24 w-24 items-center justify-center rounded-full border border-pink-500/60 bg-gradient-to-br from-pink-500 to-fuchsia-700 text-5xl shadow-[0_0_40px_-10px_rgba(236,72,153,0.8)] transition active:scale-95 hover:scale-105"
+          aria-label="BOOM"
         >
           🐖
         </button>
       </div>
 
       {/* Взрыв свиней */}
-      {boom && (
+      {boom.length > 0 && (
         <div className="absolute inset-0 z-20 flex items-center justify-center bg-black/70 backdrop-blur-sm">
-          <div className="grid h-full w-full grid-cols-6 gap-6 p-6 text-5xl sm:grid-cols-8 md:grid-cols-10 lg:grid-cols-12">
-            {pigs.map((key, i) => (
+          <div className="relative h-full w-full">
+            {boom.map((pig) => (
               <motion.span
-                key={key}
+                key={pig.id}
                 initial={{ scale: 0, rotate: 0, opacity: 0 }}
                 animate={{
-                  scale: [0, 1.2, 1],
-                  rotate: 360,
+                  scale: [0, 1.4, 1],
+                  rotate: pig.rotate,
                   opacity: 1,
+                  x: ["0%", `${pig.x - 50}%`],
+                  y: ["0%", `${pig.y - 50}%`],
                 }}
                 transition={{
-                  duration: 0.8,
-                  ease: "easeOut",
-                  delay: i * 0.006,
+                  ...floatTransition,
+                  duration: 0.9,
+                  delay: pig.delay ?? 0,
                 }}
-                className="select-none text-center"
+                className="absolute select-none"
+                style={{
+                  left: "50%",
+                  top: "50%",
+                  fontSize: `${pig.size}px`,
+                }}
               >
                 🐷
               </motion.span>
