@@ -2,6 +2,7 @@
 
 import { ArrowRight, Cpu, Radio, ScanLine } from "lucide-react";
 import { motion } from "framer-motion";
+import type { Transition } from "framer-motion";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -32,7 +33,11 @@ const features = [
   },
 ];
 
-const floatTransition = { type: "spring", stiffness: 320, damping: 22 };
+const floatTransition: Transition = {
+  type: "spring",
+  stiffness: 320,
+  damping: 22,
+};
 
 export default function Home() {
   return (
