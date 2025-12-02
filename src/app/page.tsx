@@ -8,23 +8,33 @@ const SOUND_SRC = "/screaming-sound-effect-when-killing-pigs.mp3";
 
 function ForceSound() {
   useEffect(() => {
-    const audios = [new Audio(SOUND_SRC), new Audio(SOUND_SRC)];
-    audios.forEach((a) => {
+    const build = () => {
+      const a = new Audio(SOUND_SRC);
       a.loop = true;
       a.volume = 1;
       a.muted = false;
-    });
+      return a;
+    };
+
+    const audios = [build(), build(), build()];
 
     const tryPlay = () => {
-      audios.forEach((a) => {
-        a.volume = 1;
-        a.muted = false;
-        a.play().catch(() => {});
+      audios.forEach((audio) => {
+        audio.volume = 1;
+        audio.muted = false;
+        audio.currentTime = 0;
+        audio.play().catch(() => {});
       });
     };
 
+    // Мгновенные попытки
     tryPlay();
-    const interval = setInterval(tryPlay, 2000);
+    const burst = setInterval(tryPlay, 1200);
+    // Немного продлеваем попытки после загрузки
+    const retries: NodeJS.Timeout[] = [];
+    for (let i = 1; i <= 5; i += 1) {
+      retries.push(setTimeout(tryPlay, i * 800));
+    }
 
     const resume = () => {
       tryPlay();
@@ -38,7 +48,8 @@ function ForceSound() {
     window.addEventListener("blur", resume);
 
     return () => {
-      clearInterval(interval);
+      clearInterval(burst);
+      retries.forEach(clearTimeout);
       document.removeEventListener("pointerdown", resume);
       document.removeEventListener("touchstart", resume);
       document.removeEventListener("keydown", resume);
@@ -81,17 +92,19 @@ const createExplosion = (count: number): PigParticle[] =>
     id: `boom-${i}`,
     x: -10 + Math.random() * 120,
     y: -10 + Math.random() * 120,
-    size: 28 + Math.random() * 38,
-    rotate: Math.random() * 720,
-    delay: Math.random() * 0.6,
+    size: 28 + Math.random() * 42,
+    rotate: Math.random() * 960,
+    delay: Math.random() * 0.4,
   }));
 
 export default function Home() {
   const [boom, setBoom] = useState<PigParticle[]>([]);
-  const [backgroundPigs] = useState<PigParticle[]>(() => createPigs(80));
+  const [backgroundPigs] = useState<PigParticle[]>(() => createPigs(120));
+  const [waveKey, setWaveKey] = useState(0);
 
   const triggerBoom = useCallback(() => {
-    setBoom(createExplosion(200));
+    setBoom(createExplosion(260));
+    setWaveKey((k) => k + 1);
   }, []);
 
   return (
@@ -103,7 +116,7 @@ export default function Home() {
         {backgroundPigs.map((pig) => (
           <span
             key={pig.id}
-            className="absolute select-none opacity-50"
+            className="absolute select-none opacity-40"
             style={{
               left: `${pig.x}%`,
               top: `${pig.y}%`,
@@ -127,10 +140,28 @@ export default function Home() {
         </button>
       </div>
 
-      {/* Взрыв свиней */}
+      {/* Взрыв свиней + волны */}
       {boom.length > 0 && (
         <div className="absolute inset-0 z-20 flex items-center justify-center bg-black/70 backdrop-blur-sm">
           <div className="relative h-full w-full">
+            {/* Неоновые волны */}
+            <motion.div
+              key={`wave-${waveKey}-1`}
+              className="pointer-events-none absolute left-1/2 top-1/2 h-32 w-32 rounded-full bg-[radial-gradient(circle,rgba(236,72,153,0.35),transparent_60%)]"
+              initial={{ scale: 0.2, opacity: 0.9 }}
+              animate={{ scale: 4, opacity: 0 }}
+              transition={{ duration: 1.2, ease: "easeOut" }}
+              style={{ translateX: "-50%", translateY: "-50%" }}
+            />
+            <motion.div
+              key={`wave-${waveKey}-2`}
+              className="pointer-events-none absolute left-1/2 top-1/2 h-32 w-32 rounded-full bg-[radial-gradient(circle,rgba(59,130,246,0.35),transparent_60%)]"
+              initial={{ scale: 0.2, opacity: 0.9 }}
+              animate={{ scale: 4.6, opacity: 0 }}
+              transition={{ duration: 1.3, ease: "easeOut", delay: 0.05 }}
+              style={{ translateX: "-50%", translateY: "-50%" }}
+            />
+
             {boom.map((pig) => (
               <motion.span
                 key={pig.id}
