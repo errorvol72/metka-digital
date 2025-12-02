@@ -1,10 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { motion } from "framer-motion";
-import type { Transition } from "framer-motion";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 const SOUND_SRC = "/screaming-sound-effect-when-killing-pigs.mp3";
+const BG_COUNT = 25;
+const EXPLOSION_COUNT = 60;
+const EXPLOSION_LIFETIME_MS = 5000;
 
 type StaticPig = {
   id: string;
@@ -12,24 +13,22 @@ type StaticPig = {
   y: number;
   size: number;
   rotate: number;
-  delay?: number;
+  delay: number;
 };
 
 type BlastPig = {
   id: string;
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  vr: number;
   size: number;
   rotate: number;
-  delay?: number;
-  tx: number;
-  ty: number;
+  delay: number;
 };
 
-const floatTransition: Transition = {
-  type: "spring",
-  stiffness: 180,
-  damping: 18,
-  mass: 0.5,
-};
+type Viewport = { w: number; h: number };
 
 function ForceSound() {
   useEffect(() => {
@@ -90,40 +89,54 @@ const makeBackground = (count: number): StaticPig[] =>
     id: `bg-${i}`,
     x: Math.random() * 100,
     y: Math.random() * 100,
-    size: 20 + Math.random() * 28,
+    size: 18 + Math.random() * 26,
     rotate: Math.random() * 360,
     delay: Math.random() * 0.4,
   }));
 
-const makeBlast = (count: number): BlastPig[] =>
-  Array.from({ length: count }, (_, i) => ({
-    id: `blast-${i}`,
-    size: 28 + Math.random() * 30,
-    rotate: Math.random() * 720,
-    delay: Math.random() * 0.25,
-    tx: -120 + Math.random() * 240,
-    ty: -120 + Math.random() * 240,
-  }));
+const makeBlast = (count: number, view: Viewport): BlastPig[] => {
+  const cx = view.w / 2;
+  const cy = view.h / 2;
+
+  return Array.from({ length: count }, (_, i) => {
+    const angle = Math.random() * Math.PI * 2;
+    const speed = 420 + Math.random() * 680; // px/s
+    const vx = Math.cos(angle) * speed;
+    const vy = Math.sin(angle) * speed;
+    const vr = -720 + Math.random() * 1440; // deg/s
+
+    return {
+      id: `blast-${i}`,
+      x: cx,
+      y: cy,
+      vx,
+      vy,
+      vr,
+      size: 24 + Math.random() * 32,
+      rotate: Math.random() * 360,
+      delay: Math.random() * 0.25,
+    };
+  });
+};
 
 function Background({ pigs }: { pigs: StaticPig[] }) {
   return (
     <div className="pointer-events-none absolute inset-0">
       {pigs.map((pig) => (
-        <motion.span
+        <span
           key={pig.id}
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 0.3 }}
-          transition={{ duration: 0.6, delay: pig.delay ?? 0 }}
-          className="absolute select-none"
+          className="absolute select-none opacity-30"
           style={{
             left: `${pig.x}%`,
             top: `${pig.y}%`,
             fontSize: `${pig.size}px`,
             transform: `translate(-50%, -50%) rotate(${pig.rotate}deg)`,
+            transition: "opacity 0.6s ease",
+            transitionDelay: `${pig.delay}s`,
           }}
         >
           🐷
-        </motion.span>
+        </span>
       ))}
     </div>
   );
@@ -131,72 +144,160 @@ function Background({ pigs }: { pigs: StaticPig[] }) {
 
 function Blast({
   pigs,
+  view,
   runKey,
 }: {
   pigs: BlastPig[];
+  view: Viewport;
   runKey: number;
 }) {
+  const nodes = useRef<Record<string, HTMLSpanElement | null>>({});
+  const data = useRef<BlastPig[]>(pigs);
+
+  useEffect(() => {
+    data.current = pigs;
+    // стартовая позиция в центре
+    const cx = view.w / 2;
+    const cy = view.h / 2;
+    pigs.forEach((p) => {
+      const node = nodes.current[p.id];
+      if (node) {
+        node.style.transform = `translate(${cx}px, ${cy}px) rotate(${p.rotate}deg) scale(0.6)`;
+        node.style.opacity = "0";
+      }
+    });
+  }, [pigs, view]);
+
+  useEffect(() => {
+    if (pigs.length === 0) return;
+    let active = true;
+    let last = performance.now();
+    const endAt = last + EXPLOSION_LIFETIME_MS;
+
+    const step = (now: number) => {
+      if (!active) return;
+      const dt = Math.min((now - last) / 1000, 0.04);
+      last = now;
+      const { w, h } = view;
+
+      const updated = data.current.map((p) => {
+        let x = p.x + p.vx * dt;
+        let y = p.y + p.vy * dt;
+        let vx = p.vx;
+        let vy = p.vy;
+        const rotate = p.rotate + p.vr * dt;
+
+        if (x < 0) {
+          x = -x;
+          vx = -vx;
+        } else if (x > w) {
+          x = w - (x - w);
+          vx = -vx;
+        }
+
+        if (y < 0) {
+          y = -y;
+          vy = -vy;
+        } else if (y > h) {
+          y = h - (y - h);
+          vy = -vy;
+        }
+
+        return { ...p, x, y, vx, vy, rotate };
+      });
+
+      data.current = updated;
+      updated.forEach((p) => {
+        const node = nodes.current[p.id];
+        if (node) {
+          node.style.transform = `translate(${p.x}px, ${p.y}px) rotate(${p.rotate}deg) scale(1)`;
+          node.style.opacity = "1";
+        }
+      });
+
+      if (now < endAt) {
+        requestAnimationFrame(step);
+      }
+    };
+
+    requestAnimationFrame(step);
+    return () => {
+      active = false;
+    };
+  }, [pigs, view]);
+
   return (
-    <div className="relative h-full w-full">
-      <motion.div
-        key={`wave1-${runKey}`}
-        className="pointer-events-none absolute left-1/2 top-1/2 h-32 w-32 rounded-full bg-[radial-gradient(circle,rgba(236,72,153,0.3),transparent_60%)]"
-        initial={{ scale: 0.1, opacity: 0.9 }}
-        animate={{ scale: 18, opacity: 0 }}
-        transition={{ duration: 1.6, ease: "easeOut" }}
-        style={{ translateX: "-50%", translateY: "-50%" }}
-      />
-      <motion.div
-        key={`wave2-${runKey}`}
-        className="pointer-events-none absolute left-1/2 top-1/2 h-32 w-32 rounded-full bg-[radial-gradient(circle,rgba(59,130,246,0.3),transparent_60%)]"
-        initial={{ scale: 0.1, opacity: 0.9 }}
-        animate={{ scale: 20, opacity: 0 }}
-        transition={{ duration: 1.8, ease: "easeOut", delay: 0.05 }}
-        style={{ translateX: "-50%", translateY: "-50%" }}
-      />
+    <div className="relative h-full w-full overflow-hidden">
+      <div className="pointer-events-none absolute left-1/2 top-1/2 h-32 w-32 -translate-x-1/2 -translate-y-1/2 rounded-full bg-[radial-gradient(circle,rgba(236,72,153,0.25),transparent_60%)] animate-wave1" />
+      <div className="pointer-events-none absolute left-1/2 top-1/2 h-32 w-32 -translate-x-1/2 -translate-y-1/2 rounded-full bg-[radial-gradient(circle,rgba(59,130,246,0.25),transparent_60%)] animate-wave2" />
 
       {pigs.map((pig) => (
-        <motion.span
-          key={pig.id}
-          initial={{ scale: 0.4, opacity: 0, x: 0, y: 0 }}
-          animate={{
-            scale: 1,
-            opacity: 1,
-            x: pig.tx,
-            y: pig.ty,
-            rotate: pig.rotate,
+        <span
+          key={`${runKey}-${pig.id}`}
+          ref={(node) => {
+            nodes.current[pig.id] = node;
           }}
-          transition={{
-            ...floatTransition,
-            duration: 0.6,
-            delay: pig.delay ?? 0,
-          }}
-          className="absolute left-1/2 top-1/2 select-none will-change-transform"
+          className="absolute left-0 top-0 select-none will-change-transform"
           style={{
             fontSize: `${pig.size}px`,
-            translateX: "-50%",
-            translateY: "-50%",
+            opacity: 0,
+            transition: `opacity 0.3s ease ${pig.delay}s`,
           }}
         >
           🐷
-        </motion.span>
+        </span>
       ))}
     </div>
   );
 }
 
 export default function Home() {
-  const background = useMemo(() => makeBackground(30), []);
+  const background = useMemo(() => makeBackground(BG_COUNT), []);
   const [blast, setBlast] = useState<BlastPig[]>([]);
+  const [view, setView] = useState<Viewport>({ w: 1200, h: 800 });
   const [runKey, setRunKey] = useState(0);
 
   const triggerBoom = useCallback(() => {
-    setBlast(makeBlast(60));
+    const w = typeof window !== "undefined" ? window.innerWidth : 1200;
+    const h = typeof window !== "undefined" ? window.innerHeight : 800;
+    const viewport = { w, h };
+    setView(viewport);
+    setBlast(makeBlast(EXPLOSION_COUNT, viewport));
     setRunKey((k) => k + 1);
+    setTimeout(() => setBlast([]), EXPLOSION_LIFETIME_MS);
   }, []);
 
   return (
     <div className="relative min-h-screen overflow-hidden bg-black text-white">
+      <style jsx global>{`
+        @keyframes wave1 {
+          0% {
+            transform: translate(-50%, -50%) scale(0.1);
+            opacity: 0.9;
+          }
+          100% {
+            transform: translate(-50%, -50%) scale(16);
+            opacity: 0;
+          }
+        }
+        @keyframes wave2 {
+          0% {
+            transform: translate(-50%, -50%) scale(0.1);
+            opacity: 0.9;
+          }
+          100% {
+            transform: translate(-50%, -50%) scale(18);
+            opacity: 0;
+          }
+        }
+        .animate-wave1 {
+          animation: wave1 1.8s ease-out forwards;
+        }
+        .animate-wave2 {
+          animation: wave2 2s ease-out forwards 50ms;
+        }
+      `}</style>
+
       <ForceSound />
 
       <Background pigs={background} />
@@ -213,7 +314,7 @@ export default function Home() {
 
       {blast.length > 0 && (
         <div className="absolute inset-0 z-20 flex items-center justify-center bg-black/70 backdrop-blur-sm">
-          <Blast pigs={blast} runKey={runKey} />
+          <Blast pigs={blast} view={view} runKey={runKey} />
         </div>
       )}
     </div>
