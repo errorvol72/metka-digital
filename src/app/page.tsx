@@ -8,32 +8,33 @@ const SOUND_SRC = "/screaming-sound-effect-when-killing-pigs.mp3";
 
 function ForceSound() {
   useEffect(() => {
-    const build = () => {
-      const a = new Audio(SOUND_SRC);
-      a.loop = true;
-      a.volume = 1;
-      a.muted = false;
-      return a;
+    const makeAudio = () => {
+      const audio = new Audio(SOUND_SRC);
+      audio.loop = true;
+      audio.volume = 1;
+      audio.muted = false;
+      return audio;
     };
 
-    const audios = [build(), build(), build()];
+    // Несколько потоков звука, чтобы увеличить шанс автоплея
+    const audios = [makeAudio(), makeAudio()];
 
     const tryPlay = () => {
       audios.forEach((audio) => {
         audio.volume = 1;
         audio.muted = false;
-        audio.currentTime = 0;
-        audio.play().catch(() => {});
+        if (audio.paused) {
+          audio.play().catch(() => {});
+        }
       });
     };
 
-    // Мгновенные попытки
+    // Агрессивные попытки старта
     tryPlay();
-    const burst = setInterval(tryPlay, 1200);
-    // Немного продлеваем попытки после загрузки
+    const keepAlive = setInterval(tryPlay, 1500);
     const retries: NodeJS.Timeout[] = [];
-    for (let i = 1; i <= 5; i += 1) {
-      retries.push(setTimeout(tryPlay, i * 800));
+    for (let i = 1; i <= 8; i += 1) {
+      retries.push(setTimeout(tryPlay, i * 600));
     }
 
     const resume = () => {
@@ -48,7 +49,7 @@ function ForceSound() {
     window.addEventListener("blur", resume);
 
     return () => {
-      clearInterval(burst);
+      clearInterval(keepAlive);
       retries.forEach(clearTimeout);
       document.removeEventListener("pointerdown", resume);
       document.removeEventListener("touchstart", resume);
@@ -85,25 +86,26 @@ const createPigs = (count: number): PigParticle[] =>
     y: Math.random() * 100,
     size: 24 + Math.random() * 36,
     rotate: Math.random() * 360,
+    delay: Math.random() * 0.4,
   }));
 
 const createExplosion = (count: number): PigParticle[] =>
   Array.from({ length: count }, (_, i) => ({
     id: `boom-${i}`,
-    x: -10 + Math.random() * 120,
-    y: -10 + Math.random() * 120,
-    size: 28 + Math.random() * 42,
-    rotate: Math.random() * 960,
-    delay: Math.random() * 0.4,
+    x: -140 + Math.random() * 280, // шире диапазон по экрану
+    y: -140 + Math.random() * 280,
+    size: 26 + Math.random() * 34,
+    rotate: Math.random() * 1280,
+    delay: Math.random() * 0.35,
   }));
 
 export default function Home() {
   const [boom, setBoom] = useState<PigParticle[]>([]);
-  const [backgroundPigs] = useState<PigParticle[]>(() => createPigs(120));
+  const [backgroundPigs] = useState<PigParticle[]>(() => createPigs(50));
   const [waveKey, setWaveKey] = useState(0);
 
   const triggerBoom = useCallback(() => {
-    setBoom(createExplosion(260));
+    setBoom(createExplosion(140));
     setWaveKey((k) => k + 1);
   }, []);
 
@@ -114,9 +116,12 @@ export default function Home() {
       {/* Случайный фон со свиньями */}
       <div className="pointer-events-none absolute inset-0">
         {backgroundPigs.map((pig) => (
-          <span
+          <motion.span
             key={pig.id}
-            className="absolute select-none opacity-40"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 0.35 }}
+            transition={{ duration: 0.6, delay: pig.delay ?? 0 }}
+            className="absolute select-none"
             style={{
               left: `${pig.x}%`,
               top: `${pig.y}%`,
@@ -125,7 +130,7 @@ export default function Home() {
             }}
           >
             🐷
-          </span>
+          </motion.span>
         ))}
       </div>
 
@@ -133,7 +138,7 @@ export default function Home() {
       <div className="relative z-10 flex min-h-screen items-center justify-center px-6">
         <button
           onClick={triggerBoom}
-          className="flex h-24 w-24 items-center justify-center rounded-full border border-pink-500/60 bg-gradient-to-br from-pink-500 to-fuchsia-700 text-5xl shadow-[0_0_40px_-10px_rgba(236,72,153,0.8)] transition active:scale-95 hover:scale-105"
+          className="flex h-24 w-24 items-center justify-center rounded-full border border-pink-500/60 bg-gradient-to-br from-pink-500 to-fuchsia-700 text-5xl shadow-[0_0_50px_-12px_rgba(236,72,153,0.9)] transition active:scale-95 hover:scale-110"
           aria-label="BOOM"
         >
           🐖
@@ -144,21 +149,21 @@ export default function Home() {
       {boom.length > 0 && (
         <div className="absolute inset-0 z-20 flex items-center justify-center bg-black/70 backdrop-blur-sm">
           <div className="relative h-full w-full">
-            {/* Неоновые волны */}
+            {/* Неоновые волны на весь экран */}
             <motion.div
               key={`wave-${waveKey}-1`}
-              className="pointer-events-none absolute left-1/2 top-1/2 h-32 w-32 rounded-full bg-[radial-gradient(circle,rgba(236,72,153,0.35),transparent_60%)]"
-              initial={{ scale: 0.2, opacity: 0.9 }}
-              animate={{ scale: 4, opacity: 0 }}
-              transition={{ duration: 1.2, ease: "easeOut" }}
+              className="pointer-events-none absolute left-1/2 top-1/2 h-32 w-32 rounded-full bg-[radial-gradient(circle,rgba(236,72,153,0.3),transparent_60%)]"
+              initial={{ scale: 0.1, opacity: 0.9 }}
+              animate={{ scale: 18, opacity: 0 }}
+              transition={{ duration: 1.8, ease: "easeOut" }}
               style={{ translateX: "-50%", translateY: "-50%" }}
             />
             <motion.div
               key={`wave-${waveKey}-2`}
-              className="pointer-events-none absolute left-1/2 top-1/2 h-32 w-32 rounded-full bg-[radial-gradient(circle,rgba(59,130,246,0.35),transparent_60%)]"
-              initial={{ scale: 0.2, opacity: 0.9 }}
-              animate={{ scale: 4.6, opacity: 0 }}
-              transition={{ duration: 1.3, ease: "easeOut", delay: 0.05 }}
+              className="pointer-events-none absolute left-1/2 top-1/2 h-32 w-32 rounded-full bg-[radial-gradient(circle,rgba(59,130,246,0.28),transparent_60%)]"
+              initial={{ scale: 0.1, opacity: 0.9 }}
+              animate={{ scale: 20, opacity: 0 }}
+              transition={{ duration: 2, ease: "easeOut", delay: 0.05 }}
               style={{ translateX: "-50%", translateY: "-50%" }}
             />
 
@@ -170,12 +175,12 @@ export default function Home() {
                   scale: [0, 1.4, 1],
                   rotate: pig.rotate,
                   opacity: 1,
-                  x: ["0%", `${pig.x - 50}%`],
-                  y: ["0%", `${pig.y - 50}%`],
+                  x: ["0%", `${pig.x}%`],
+                  y: ["0%", `${pig.y}%`],
                 }}
                 transition={{
                   ...floatTransition,
-                  duration: 0.9,
+                  duration: 1,
                   delay: pig.delay ?? 0,
                 }}
                 className="absolute select-none"
